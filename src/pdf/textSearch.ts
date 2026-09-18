@@ -21,6 +21,9 @@ export interface TextContent {
  * 纯本地文本查找：
  * - 搜索仅在单页内进行（不跨页）；
  * - 查询与页面文本中的连续空白（含换行、为排版拉宽的空白 item）统一折叠为一个空格后再匹配；
+ * - 相邻 text item 若满足“同一连续词”排版条件（方向、基线、间距均在阈值内且未换行），
+ *   归一化文本不在其间插入空格，跨 item 的连续词（如“保”+“密”）可被整体命中；
+ *   存在显式空白、换行或超过任一阈值时仍保留一个空格分隔；
  * - 命中可跨相邻 pdf.js text item，但每个命中只按实际命中的字形范围生成候选框，
  *   间隔的未命中文字不会被框入。
  */
@@ -46,22 +49,81 @@ export interface PageText {
 
 const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
+/** 相邻文字项判定为“同一连续词”的阈值：方向夹角（度）与基线偏移 / 间距（较小字高的倍数） */
+const CONT_ANGLE_DEG = 5;
+const CONT_PERP_RATIO = 0.2;
+const CONT_GAP_RATIO = 0.2;
+
+/**
+ * 判断 next 是否紧跟 prev 构成同一连续词（pdf.js 常把同一词拆成多个 item）：
+ * - prev 未标记 hasEOL（未换行）；
+ * - 两项基线方向夹角不超过 5°；
+ * - 基线垂直偏移不超过较小文字高度的 0.2 倍；
+ * - next 基线起点相对 prev 基线终点沿基线方向的投影间距不超过该高度的 0.2 倍
+ *   （负值即轻微重叠，同样视为连续）。
+ */
+export function itemsAreContinuous(prev: TextItem, next: TextItem): boolean {
+  if (prev.hasEOL) return false;
+  const tp = prev.transform;
+  const tn = next.transform;
+  const plen = Math.hypot(tp[0], tp[1]);
+  const nlen = Math.hypot(tn[0], tn[1]);
+  if (plen === 0 || nlen === 0) return false;
+
+  // 基线方向夹角
+  const cos = (tp[0] * tn[0] + tp[1] * tn[1]) / (plen * nlen);
+  const angle = (Math.acos(Math.min(Math.max(cos, -1), 1)) * 180) / Math.PI;
+  if (angle > CONT_ANGLE_DEG) return false;
+
+  // 较小文字高度（item.height 缺失时退回变换矩阵的高度基向量长度）
+  const ph = prev.height > 0 ? prev.height : Math.hypot(tp[2], tp[3]);
+  const nh = next.height > 0 ? next.height : Math.hypot(tn[2], tn[3]);
+  const minH = Math.min(ph, nh);
+  if (!(minH > 0)) return false;
+
+  const ux = tp[0] / plen;
+  const uy = tp[1] / plen;
+  const dx = tn[4] - tp[4];
+  const dy = tn[5] - tp[5];
+
+  // 基线垂直偏移：位移在以前项基线法向上的投影长度
+  const perp = Math.abs(dx * -uy + dy * ux);
+  if (perp > CONT_PERP_RATIO * minH) return false;
+
+  // 沿基线投影间距：next 基线起点相对 prev 基线终点的前移量
+  const gap = dx * ux + dy * uy - prev.width;
+  if (gap > CONT_GAP_RATIO * minH) return false;
+
+  return true;
+}
+
 /** 构建单页归一化文本与 归一化字符 -> (item, item 内码点偏移) 的映射 */
 export function buildPageText(page: number, content: TextContent): PageText {
   const items = content.items.filter((it): it is TextItem => 'str' in it);
   const units: Unit[] = [];
   let textItemCount = 0;
+  /** 最近一个贡献了非空白文字的 item 下标，及其是否以显式空白结尾 */
+  let lastTextItem = -1;
+  let lastEndedWithSpace = false;
 
   for (let i = 0; i < items.length; i += 1) {
     const str = items[i].str;
     const prevUnit = units[units.length - 1];
     const prevEndedWithText = prevUnit && prevUnit.item >= 0 && prevUnit.indexInItem >= 0;
     // 当前 item 以文字开头，且上一个有效码元是“上个 item 的文字”（中间无空白 item）时，
-    // 补一个跨 item 分隔空格；空白 item 自身折叠的空格已经承担分隔，不再重复补
+    // 默认补一个跨 item 分隔空格；空白 item 自身折叠的空格已经承担分隔，不再重复补。
+    // 但若两项构成同一连续词（同向、同基线、间距极小、未换行、无显式空白），
+    // 则不补空格，使跨 item 的连续词可被命中。
     const firstCp = str.length > 0 ? String.fromCodePoint(str.codePointAt(0)!) : '';
     const startsWithText = firstCp.length > 0 && !isWhitespace(firstCp);
     if (startsWithText && prevEndedWithText) {
-      units.push({ ch: ' ', item: -1, indexInItem: -1 });
+      const continuous =
+        lastTextItem >= 0 &&
+        !lastEndedWithSpace &&
+        itemsAreContinuous(items[lastTextItem], items[i]);
+      if (!continuous) {
+        units.push({ ch: ' ', item: -1, indexInItem: -1 });
+      }
     }
     let pendingSpace = false;
     let addedFromItem = false;
@@ -90,7 +152,12 @@ export function buildPageText(page: number, content: TextContent): PageText {
     if (!addedFromItem && pendingSpace && units.length > 0 && units[units.length - 1].ch !== ' ') {
       units.push({ ch: ' ', item: i, indexInItem: -1 });
     }
-    if (addedFromItem) textItemCount += 1;
+    if (addedFromItem) {
+      textItemCount += 1;
+      lastTextItem = i;
+      // 结尾残留的 pendingSpace 表示该 item 以显式空白收尾，下一边界须保留分隔
+      lastEndedWithSpace = pendingSpace;
+    }
   }
 
   return {
