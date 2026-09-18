@@ -21,9 +21,17 @@ export interface TextContent {
  * 纯本地文本查找：
  * - 搜索仅在单页内进行（不跨页）；
  * - 查询与页面文本中的连续空白（含换行、为排版拉宽的空白 item）统一折叠为一个空格后再匹配；
+ * - 相邻 text item 的跨边界空格仅在“确有分隔”时补入：前项结尾有显式空白、前项标记 hasEOL，
+ *   或两 item 方向夹角 / 基线垂直偏移 / 沿基线间距超过阈值时插入一个空格；
+ *   否则视为同一连续词直接拼接（修复被 pdf.js 拆成多个 item 的中文连续词漏检）；
  * - 命中可跨相邻 pdf.js text item，但每个命中只按实际命中的字形范围生成候选框，
  *   间隔的未命中文字不会被框入。
  */
+
+/** 跨 item 连续判定阈值（见 itemsContinuous） */
+const MAX_ANGLE_DEG = 5;
+/** 基线垂直偏移 / 沿基线投影间距均不超过较小文字高度的 0.2 倍 */
+const GAP_RATIO = 0.2;
 
 interface Unit {
   /** 归一化后的码元（普通字符或单个空格） */
@@ -46,6 +54,65 @@ export interface PageText {
 
 const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
+/** item 的文字高度：优先用 height（未缩放设备单位），缺失时回退为 transform 的纵向基向量长度 */
+function itemFontHeight(it: TextItem): number {
+  const fromHeight = it.height;
+  if (Number.isFinite(fromHeight) && fromHeight > 0) return fromHeight;
+  return Math.hypot(it.transform[2], it.transform[3]) || 1;
+}
+
+/**
+ * 判定两个相邻 text item 是否属于同一连续词（前项 prev 后紧跟当前项 cur），
+ * 以下条件必须同时成立才在归一化文本中直接拼接、不补空格：
+ * 1. 前项未标记 hasEOL（hasEOL 为 true 表示 pdf.js 认为此处有换行 / 硬分隔）；
+ * 2. 两 item 基线方向夹角不超过 5°；
+ * 3. 当前项基线起点相对前项基线的垂直偏移不超过较小文字高度的 0.2 倍；
+ * 4. 前项基线终点到当前项基线起点沿基线方向的投影间距（gap，负值为重叠）不超过该高度的 0.2 倍。
+ */
+export function itemsContinuous(prev: TextItem, cur: TextItem): boolean {
+  if (prev.hasEOL) return false;
+
+  const t = prev.transform;
+  const prevBx = t[0];
+  const prevBy = t[1];
+  const prevBLen = Math.hypot(prevBx, prevBy);
+  if (!(prevBLen > 0)) return false;
+  const ux = prevBx / prevBLen;
+  const uy = prevBy / prevBLen;
+
+  const ct = cur.transform;
+  const curBx = ct[0];
+  const curBy = ct[1];
+  const curBLen = Math.hypot(curBx, curBy);
+  if (!(curBLen > 0)) return false;
+
+  // 方向夹角（点积 -> cos，归一化到 [0,1] 防浮点越界）
+  const dot = (prevBx * curBx + prevBy * curBy) / (prevBLen * curBLen);
+  const cos = clamp(dot, -1, 1);
+  const angleDeg = (Math.acos(cos) * 180) / Math.PI;
+  if (angleDeg > MAX_ANGLE_DEG) return false;
+
+  const h = Math.min(itemFontHeight(prev), itemFontHeight(cur));
+  if (!(h > 0)) return false;
+  // 阈值自身按坐标尺度放大一个机器精度量级，使“恰好 0.2 倍字高”的边界不受浮点误差影响
+  const eps = 1e-9 * Math.max(1, Math.abs(t[4]), Math.abs(t[5]), prev.width, h);
+  const maxGap = GAP_RATIO * h + eps;
+
+  // 当前项基线起点相对于前项基线起点的位移
+  const dx = ct[4] - t[4];
+  const dy = ct[5] - t[5];
+
+  // 垂直于基线方向的偏移（不同行 / 上下错开）
+  const perp = Math.abs(dy * ux - dx * uy);
+  if (perp > maxGap) return false;
+
+  // 沿基线方向：前项终点推进 prev.width 后到当前项起点的投影间距
+  const gap = dx * ux + dy * uy - prev.width;
+  if (gap > maxGap) return false;
+
+  return true;
+}
+
 /** 构建单页归一化文本与 归一化字符 -> (item, item 内码点偏移) 的映射 */
 export function buildPageText(page: number, content: TextContent): PageText {
   const items = content.items.filter((it): it is TextItem => 'str' in it);
@@ -56,12 +123,18 @@ export function buildPageText(page: number, content: TextContent): PageText {
     const str = items[i].str;
     const prevUnit = units[units.length - 1];
     const prevEndedWithText = prevUnit && prevUnit.item >= 0 && prevUnit.indexInItem >= 0;
-    // 当前 item 以文字开头，且上一个有效码元是“上个 item 的文字”（中间无空白 item）时，
-    // 补一个跨 item 分隔空格；空白 item 自身折叠的空格已经承担分隔，不再重复补
+    // 当前 item 以文字开头，且上一个有效码元是“上个 item 的文字”时，需要决定 item 边界是否补空格：
+    // 仅当存在显式分隔（前项结尾有空白 / hasEOL）或几何上不连续（方向、垂直偏移或沿基间距超阈值）
+    // 时补一个空格；否则按同一连续词直接拼接（如被 pdf.js 拆开的「保」「密」可被「保密」命中）。
+    // 中间夹着空白 item、或前项内部空白折叠出的空格已承担分隔，不会走到这里。
     const firstCp = str.length > 0 ? String.fromCodePoint(str.codePointAt(0)!) : '';
     const startsWithText = firstCp.length > 0 && !isWhitespace(firstCp);
     if (startsWithText && prevEndedWithText) {
-      units.push({ ch: ' ', item: -1, indexInItem: -1 });
+      const prevItem = items[prevUnit!.item];
+      const prevEndsWithWhitespace = /\s$/u.test(prevItem.str);
+      if (prevEndsWithWhitespace || !itemsContinuous(prevItem, items[i])) {
+        units.push({ ch: ' ', item: -1, indexInItem: -1 });
+      }
     }
     let pendingSpace = false;
     let addedFromItem = false;
@@ -86,8 +159,11 @@ export function buildPageText(page: number, content: TextContent): PageText {
       cpIndex += 1;
       j += step;
     }
-    // item 只含空白时，它本身承担一次分隔空格
-    if (!addedFromItem && pendingSpace && units.length > 0 && units[units.length - 1].ch !== ' ') {
+    // 末尾挂起的显式空白（含换行）折叠为一个分隔空格保留：
+    // 含文字 item 的结尾空白表示它与后续内容确有分隔；纯空白 item 自身也承担一次分隔。
+    // 前一码元已是空格时不重复添加，保证整体仍折叠为一个空格；整页结尾的空白后面再无内容，不保留。
+    const isLastItem = i === items.length - 1;
+    if (pendingSpace && !isLastItem && units.length > 0 && units[units.length - 1].ch !== ' ') {
       units.push({ ch: ' ', item: i, indexInItem: -1 });
     }
     if (addedFromItem) textItemCount += 1;

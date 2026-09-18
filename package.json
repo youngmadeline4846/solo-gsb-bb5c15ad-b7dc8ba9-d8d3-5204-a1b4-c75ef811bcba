@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
@@ -15,9 +16,11 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/node": "^20.19.43",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.21.5",
     "typescript": "~5.6.3",
     "vite": "^5.4.11"
   }
