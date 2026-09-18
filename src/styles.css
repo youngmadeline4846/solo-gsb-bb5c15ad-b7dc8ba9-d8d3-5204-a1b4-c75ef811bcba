@@ -1,0 +1,590 @@
+:root {
+  color-scheme: dark;
+  --bg: #16171c;
+  --panel: #1f2129;
+  --panel-2: #262933;
+  --border: #343744;
+  --text: #e6e8ee;
+  --text-dim: #9aa0ae;
+  --accent: #4f8cff;
+  --danger: #ff4d4f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 工具栏 ---------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 700;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.toolbar button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.toolbar button.primary,
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.zoom-label,
+.page-label {
+  color: var(--text-dim);
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 提示条 ---------- */
+.error-bar {
+  background: #4a1d1d;
+  color: #ffb4b4;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.progress-bar {
+  background: #1d3a4a;
+  color: #b4e0ff;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* ---------- 主区域 ---------- */
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.page-list {
+  width: 176px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thumb {
+  background: var(--panel-2);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.thumb:hover {
+  border-color: var(--border);
+}
+
+.thumb.active {
+  border-color: var(--accent);
+}
+
+.thumb canvas {
+  background: #fff;
+  max-width: 100%;
+  height: auto;
+  border-radius: 2px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.thumb-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.badge {
+  background: var(--danger);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.viewer {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  padding: 24px;
+  background: var(--bg);
+}
+
+/* ---------- 页面舞台 ---------- */
+.page-stage {
+  position: relative;
+  margin: auto;
+  background: #fff;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+  user-select: none;
+  touch-action: none;
+  flex: none;
+}
+
+.page-stage canvas {
+  display: block;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.tool-draw .overlay {
+  cursor: crosshair;
+}
+
+/* 绘制模式下遮盖框不拦截指针，方便框选任意区域 */
+.tool-draw .redaction-box {
+  pointer-events: none;
+}
+
+.redaction-box {
+  position: absolute;
+  background: rgba(10, 10, 14, 0.72);
+  border: 1px solid rgba(255, 77, 79, 0.85);
+  cursor: move;
+}
+
+.redaction-box.selected {
+  border: 2px solid var(--danger);
+  background: rgba(10, 10, 14, 0.6);
+}
+
+.redaction-box.drafting {
+  border: 1px dashed var(--danger);
+  background: rgba(255, 77, 79, 0.18);
+  pointer-events: none;
+}
+
+.handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1.5px solid var(--danger);
+  border-radius: 2px;
+}
+
+.handle-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.handle-n  { left: calc(50% - 5px); top: -6px; cursor: ns-resize; }
+.handle-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.handle-e  { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+.handle-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.handle-s  { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
+.handle-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.handle-w  { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+
+/* ---------- 空状态 ---------- */
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.empty-card {
+  max-width: 460px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px 36px;
+}
+
+.empty-card h1 {
+  margin: 0 0 12px;
+  font-size: 24px;
+}
+
+.empty-card p {
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.empty-card .big {
+  font-size: 15px;
+  padding: 10px 26px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.empty-card .hint {
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+/* ---------- 状态栏 ---------- */
+.status-bar {
+  display: flex;
+  gap: 24px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---------- 查找高亮（画布内） ---------- */
+.find-highlight {
+  position: absolute;
+  background: rgba(255, 199, 0, 0.42);
+  border: 1px solid rgba(214, 150, 0, 0.95);
+  border-radius: 2px;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.find-highlight.checked {
+  background: rgba(255, 138, 0, 0.5);
+  border-color: rgba(200, 90, 0, 0.95);
+}
+
+/* ---------- 文本查找面板 ---------- */
+.find-panel {
+  width: 336px;
+  flex: none;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.find-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.find-title {
+  font-weight: 700;
+}
+
+.find-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.find-close:hover {
+  color: var(--text);
+}
+
+.find-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.find-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 78px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.find-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.find-input:disabled {
+  opacity: 0.6;
+}
+
+.find-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.find-actions button {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.find-actions .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.find-actions .danger {
+  background: #5a2222;
+  border-color: #8a3636;
+  color: #ffd5d5;
+}
+
+.find-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.find-status {
+  font-size: 12px;
+  line-height: 1.6;
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+
+.find-status.progress {
+  background: #1d3a4a;
+  color: #b4e0ff;
+}
+
+.find-status.warn {
+  background: #4a3418;
+  color: #ffd9a0;
+}
+
+.find-status.ok {
+  background: #1d3a26;
+  color: #b7f0c8;
+}
+
+.find-status.dim {
+  color: var(--text-dim);
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.find-progress-track {
+  margin-top: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.find-progress-bar {
+  height: 100%;
+  background: #7cc4ff;
+  transition: width 0.12s linear;
+}
+
+.find-result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.find-selectbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.find-selectbar .dim {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.find-selectbar .small {
+  margin-left: auto;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.find-selectbar .small:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.find-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.find-group {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.find-group.current {
+  border-color: var(--accent);
+}
+
+.find-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.find-page-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+
+.find-page-link:hover {
+  text-decoration: underline;
+}
+
+.find-hit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.find-hit-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.find-hit-check {
+  display: flex;
+  align-items: center;
+  padding-top: 3px;
+  cursor: pointer;
+}
+
+.find-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.find-snippet {
+  flex: 1;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-all;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.find-snippet:hover {
+  color: var(--accent);
+  background: rgba(79, 140, 255, 0.1);
+}
+
+.find-hit-list .dim,
+.dim {
+  color: var(--text-dim);
+  font-size: 12px;
+}
